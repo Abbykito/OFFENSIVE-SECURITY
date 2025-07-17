@@ -1,0 +1,8 @@
+#first  create the python file
+sudo nano SimpleHTTPServerWithUpload.py
+
+#chmod
+chown 755 SimpleHTTPServerWithUpload.py
+
+#finally run
+python3 SimpleHTTPServerWithUpload.py 80
