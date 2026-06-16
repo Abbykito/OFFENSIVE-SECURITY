@@ -1,1 +1,80 @@
 
+cat > ~/.local/bin/web-triage << 'EOF'
+#!/bin/bash
+
+# ==============================================================================
+# Script Name: web-triage
+# Description: Low-noise, fast enumeration of web configs, APIs, and sitemap parsing.
+# Author:      abbycyber
+# ==============================================================================
+
+target=$1
+
+# Ensure a target argument was provided
+if [ -z "$target" ]; then
+    echo -e "\033[1;31m[-] Error: Missing target parameter.\033[0m"
+    echo "Usage: $0 <IP_or_Domain>"
+    exit 1
+fi
+
+# Clean up input (removes http:// or https:// prefixes if accidentally pasted)
+target=$(echo "$target" | sed -e 's|^[^/]*//||' -e 's|/.*||')
+
+echo -e "\n\033[1;34m[*] Running Quick-Win Web Triage for: $target\033[0m"
+echo "--------------------------------------------------------"
+
+# Defining a clean User-Agent to prevent basic WAF/Server blocking
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+# 1. Check Root Page Source for common leaks & API references
+echo -e "\033[1;33m[+] Checking Page Source for secrets, leaks, or API strings...\033[0m"
+curl -s -A "$USER_AGENT" "http://$target/" | grep -Ei "bak|old|conf|sql|zip|~|id_rsa|backup|api/v|/api/"
+
+# 2. Array of classic low-hanging fruit paths, APIs, and Sitemaps
+paths=(
+    "robots.txt" 
+    "sitemap.xml"
+    ".git/HEAD" 
+    ".env" 
+    "backup/" 
+    "config.php" 
+    "config.bak"
+    ".htaccess" 
+    ".htpasswd"
+    "wp-config.php"
+    "index.php~"
+    "api/"
+    "api/v1/"
+    "api/v2/"
+    "rest/"
+    "v1/"
+    "graphql"
+)
+
+# 3. Iterate and check HTTP Status Codes natively
+for path in "${paths[@]}"; do
+    url="http://$target/$path"
+    
+    # Pull only the HTTP Response Code
+    status=$(curl -s -A "$USER_AGENT" -o /dev/null -w "%{http_code}" "$url")
+    
+    if [ "$status" -eq 200 ]; then
+        if [[ "$path" == *"api"* || "$path" == "rest/" || "$path" == "graphql" ]]; then
+            echo -e "\033[1;36m[!] API FOUND  (200 OK): $url\033[0m"
+        elif [ "$path" == "sitemap.xml" ]; then
+            echo -e "\033[1;32m[!] EXPOSED    (200 OK): $url\033[0m"
+            echo -e "\033[1;33m    [->] Extracting URLs from Sitemap:\033[0m"
+            # Fast regex mapping to pull URLs wrapped inside <loc> tags in the sitemap
+            curl -s -A "$USER_AGENT" "$url" | grep -oP '(?<=<loc>)[^<]+' | sed 's/^/         - /'
+        else
+            echo -e "\033[1;32m[!] EXPOSED    (200 OK): $url\033[0m"
+        fi
+    elif [ "$status" -eq 403 ]; then
+        echo -e "\033[1;35m[*] FORBIDDEN  (403):   $url (Directory exists but restricted)\033[0m"
+    elif [ "$status" -eq 401 ]; then
+        echo -e "\033[1;31m[!] AUTH REQ   (401):   $url (Endpoint exists, requires tokens/creds)\033[0m"
+    fi
+done
+EOF
+# change to executable
+chmod +x ~/.local/bin/web-triage
